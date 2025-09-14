@@ -23,6 +23,8 @@ const VideoInterview = () => {
 
   // --- Start Video ---
   useEffect(() => {
+    let isMounted=true;
+
     const startVideo = async () => {
       try {
         const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -40,7 +42,7 @@ const VideoInterview = () => {
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [stream]);  // Added 'stream' as dependency
+  }, []);  // Added 'stream' as dependency
 
   // --- Detection Utilities ---
   const checkLookingAway = (face, videoWidth) => {
