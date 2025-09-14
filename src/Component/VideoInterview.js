@@ -21,12 +21,14 @@ const VideoInterview = () => {
   const lastLookAwayTime = useRef(0);
   const detectionInterval = useRef(null);
 
-  // --- Start Video ---
+  // --- Start Video (Only once) ---
   useEffect(() => {
     const startVideo = async () => {
       try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        videoRef.current.srcObject = mediaStream;
+        const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: true });
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+        }
         setStream(mediaStream);
         setStartTime(Date.now());
       } catch (error) {
@@ -40,9 +42,8 @@ const VideoInterview = () => {
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [stream]);  // Added 'stream' as dependency
+  }, []);  // Run only once
 
-  // --- Detection Utilities ---
   const checkLookingAway = (face, videoWidth) => {
     const faceCenterX = face.topLeft[0] + (face.bottomRight[0] - face.topLeft[0]) / 2;
     const normalizedX = faceCenterX / videoWidth;
@@ -55,7 +56,7 @@ const VideoInterview = () => {
     return ratio < 0.1;
   };
 
-  // --- Main Detection Loop ---
+  // --- Detection Loop (Load models only once) ---
   useEffect(() => {
     let cocoModel, faceModel;
     let isMounted = true;
@@ -70,7 +71,7 @@ const VideoInterview = () => {
 
         const [cocoPredictions, facePredictions] = await Promise.all([
           cocoModel.detect(videoRef.current),
-          faceModel.estimateFaces(videoRef.current, false)
+          faceModel.estimateFaces(videoRef.current, false),
         ]);
 
         const currentTime = Date.now();
@@ -85,13 +86,16 @@ const VideoInterview = () => {
         };
 
         // Face Detection
-        if (facePredictions.length === 0 && currentTime - lastFaceCheckTime.current > 5000) {
+        const hasFace = facePredictions.length >= 1;
+        if (hasFace !== faceDetected) {
+          setFaceDetected(hasFace);
+        }
+
+        if (!hasFace && currentTime - lastFaceCheckTime.current > 5000) {
           addEvent('No face detected for more than 5 seconds');
           lastFaceCheckTime.current = currentTime;
-          setFaceDetected(false);
-        } else if (facePredictions.length >= 1) {
+        } else if (hasFace) {
           lastFaceCheckTime.current = currentTime;
-          setFaceDetected(true);
         }
 
         // Multiple Faces
@@ -111,23 +115,17 @@ const VideoInterview = () => {
         }
 
         // Look Away & Eyes Closed
-        if (facePredictions.length === 1) {
-          const face = facePredictions[0];
+        facePredictions.forEach((face, index) => {
           if (checkLookingAway(face, videoRef.current.videoWidth) &&
               currentTime - lastLookAwayTime.current > 5000) {
-            addEvent('User looking away');
+            addEvent(`User ${index + 1} looking away`);
             lastLookAwayTime.current = currentTime;
           }
           if (checkEyesClosed(face, videoRef.current.videoHeight)) {
-            addEvent('User eyes closed');
+            addEvent(`User ${index + 1} eyes closed`);
           }
-        } else if (facePredictions.length > 1) {
-          const lookingAwayCount = facePredictions.filter(face => checkLookingAway(face, videoRef.current.videoWidth)).length;
-          const eyesClosedCount = facePredictions.filter(face => checkEyesClosed(face, videoRef.current.videoHeight)).length;
+        });
 
-          if (lookingAwayCount > 0) addEvent(`${lookingAwayCount} users looking away`);
-          if (eyesClosedCount > 0) addEvent(`${eyesClosedCount} users eyes closed`);
-        }
       }, 1000);
     };
 
@@ -137,9 +135,8 @@ const VideoInterview = () => {
       isMounted = false;
       if (detectionInterval.current) clearInterval(detectionInterval.current);
     };
-  }, []);
+  }, [faceDetected]);
 
-  // --- Export CSV ---
   const exportLogsAsCSV = () => {
     const interviewDuration = ((Date.now() - startTime) / 1000).toFixed(0) + ' sec';
     const focusLostEvents = eventLogs.filter(log => log.event.includes('No face detected')).length;
@@ -148,7 +145,7 @@ const VideoInterview = () => {
     const eyesClosedEvents = eventLogs.filter(log => log.event.includes('eyes closed')).length;
     const lookingAwayEvents = eventLogs.filter(log => log.event.includes('looking away')).length;
 
-    const totalDeductions = focusLostEvents*5 + multipleFacesEvents*5 + suspiciousItemEvents*10 + eyesClosedEvents*10 + lookingAwayEvents*5;
+    const totalDeductions = focusLostEvents * 5 + multipleFacesEvents * 5 + suspiciousItemEvents * 10 + eyesClosedEvents * 10 + lookingAwayEvents * 5;
     const integrityScore = Math.max(0, 100 - totalDeductions);
 
     const summary = [
@@ -159,7 +156,7 @@ const VideoInterview = () => {
       ['Suspicious Item Events', suspiciousItemEvents],
       ['Eyes Closed Events', eyesClosedEvents],
       ['Looking Away Events', lookingAwayEvents],
-      ['Final Integrity Score', integrityScore]
+      ['Final Integrity Score', integrityScore],
     ];
 
     const logLines = eventLogs.map(log => `${log.timestamp},${log.event}`);
@@ -192,7 +189,14 @@ const VideoInterview = () => {
 
       <div className={styles.interviewWrapper}>
         <div className={styles.videoWrapper}>
-          <video ref={videoRef} autoPlay playsInline className={styles.video} />
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            className={styles.video}
+            width="640"
+            height="480"
+          />
           <div className={`${styles.status} ${faceDetected ? styles.statusGreen : styles.statusRed}`}>
             {faceDetected ? 'Face detected ✅' : 'No face detected ❌'}
           </div>
