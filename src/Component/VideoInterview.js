@@ -19,6 +19,7 @@ const VideoInterview = () => {
   const lastMultipleFacesTime = useRef(0);
   const lastItemDetectionTime = useRef(0);
   const lastLookAwayTime = useRef(0);
+  const detectionInterval = useRef(null);
 
   // --- Start Video ---
   useEffect(() => {
@@ -35,9 +36,11 @@ const VideoInterview = () => {
     startVideo();
 
     return () => {
-      if (stream) stream.getTracks().forEach(track => track.stop());
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
     };
-  }, []);
+  }, [stream]);  // Added 'stream' as dependency
 
   // --- Detection Utilities ---
   const checkLookingAway = (face, videoWidth) => {
@@ -55,14 +58,15 @@ const VideoInterview = () => {
   // --- Main Detection Loop ---
   useEffect(() => {
     let cocoModel, faceModel;
+    let isMounted = true;
 
     const loadModelsAndRun = async () => {
       cocoModel = await cocoSsd.load();
       faceModel = await blazeface.load();
       console.log('COCO-SSD and BlazeFace models loaded');
 
-      const interval = setInterval(async () => {
-        if (!videoRef.current || videoRef.current.readyState < 2) return;
+      detectionInterval.current = setInterval(async () => {
+        if (!isMounted || !videoRef.current || videoRef.current.readyState < 2) return;
 
         const [cocoPredictions, facePredictions] = await Promise.all([
           cocoModel.detect(videoRef.current),
@@ -80,7 +84,7 @@ const VideoInterview = () => {
           });
         };
 
-        // --- Face Detection ---
+        // Face Detection
         if (facePredictions.length === 0 && currentTime - lastFaceCheckTime.current > 5000) {
           addEvent('No face detected for more than 5 seconds');
           lastFaceCheckTime.current = currentTime;
@@ -90,21 +94,23 @@ const VideoInterview = () => {
           setFaceDetected(true);
         }
 
-        // --- Multiple Faces ---
+        // Multiple Faces
         if (facePredictions.length > 1 && currentTime - lastMultipleFacesTime.current > 5000) {
           addEvent(`Multiple users detected (${facePredictions.length})`);
           lastMultipleFacesTime.current = currentTime;
         }
 
-        // --- Suspicious Items ---
+        // Suspicious Items
         if (currentTime - lastItemDetectionTime.current > 2000) {
           cocoPredictions.forEach(pred => {
-            if (suspiciousItems.includes(pred.class)) addEvent(`Suspicious Item Detected: ${pred.class}`);
+            if (suspiciousItems.includes(pred.class)) {
+              addEvent(`Suspicious Item Detected: ${pred.class}`);
+            }
           });
           lastItemDetectionTime.current = currentTime;
         }
 
-        // --- Look Away & Eyes Closed ---
+        // Look Away & Eyes Closed
         if (facePredictions.length === 1) {
           const face = facePredictions[0];
           if (checkLookingAway(face, videoRef.current.videoWidth) &&
@@ -122,13 +128,15 @@ const VideoInterview = () => {
           if (lookingAwayCount > 0) addEvent(`${lookingAwayCount} users looking away`);
           if (eyesClosedCount > 0) addEvent(`${eyesClosedCount} users eyes closed`);
         }
-
       }, 1000);
-
-      return () => clearInterval(interval);
     };
 
     loadModelsAndRun();
+
+    return () => {
+      isMounted = false;
+      if (detectionInterval.current) clearInterval(detectionInterval.current);
+    };
   }, []);
 
   // --- Export CSV ---
