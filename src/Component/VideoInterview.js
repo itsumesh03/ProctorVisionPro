@@ -23,24 +23,37 @@ const VideoInterview = () => {
 
   // --- Start Video ---
   useEffect(() => {
-    const startVideo = async () => {
-      try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  if (typeof window === 'undefined') return;
+
+  let isMounted = true;
+
+  const startVideo = async () => {
+    try {
+      if (!navigator.mediaDevices) {
+        console.warn('Media devices not available');
+        return;
+      }
+
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      if (isMounted && videoRef.current) {
         videoRef.current.srcObject = mediaStream;
         setStream(mediaStream);
         setStartTime(Date.now());
-      } catch (error) {
-        console.error('Error accessing webcam:', error);
       }
-    };
-    startVideo();
+    } catch (error) {
+      console.error('Error accessing webcam:', error);
+    }
+  };
 
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [stream]);  // Added 'stream' as dependency
+  startVideo();
+
+  return () => {
+    isMounted = false;
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+  };
+}, []); 
 
   // --- Detection Utilities ---
   const checkLookingAway = (face, videoWidth) => {
